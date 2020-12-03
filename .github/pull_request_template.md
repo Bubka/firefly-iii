@@ -1,8 +1,11 @@
 <!--
-Please read me:
+Before you create a new PR, please consider:
 
-1) DO NOT create a pull request for the MASTER branch.
-2) DO NOT create pull requests to add new CURRENCIES.
+1) Pull requests for the MAIN branch will be closed.
+2) We cannot accept pull requests to add new currencies.
+3) DO NOT include translations in your PR. Only English US sentences.
+
+Thanks.
 -->
 
 Fixes issue # (if relevant)

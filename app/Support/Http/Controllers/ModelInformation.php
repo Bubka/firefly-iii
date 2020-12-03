@@ -1,35 +1,34 @@
 <?php
 /**
  * ModelInformation.php
- * Copyright (c) 2018 thegrumpydictator@gmail.com
+ * Copyright (c) 2019 james@firefly-iii.org
  *
- * This file is part of Firefly III.
+ * This file is part of Firefly III (https://github.com/firefly-iii).
  *
- * Firefly III is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
  *
- * Firefly III is distributed in the hope that it will be useful,
+ * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * GNU Affero General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with Firefly III. If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 declare(strict_types=1);
 
 namespace FireflyIII\Support\Http\Controllers;
 
-use FireflyIII\Exceptions\FireflyException;
-use FireflyIII\Models\Account;
+use FireflyIII\Models\AccountType;
 use FireflyIII\Models\Bill;
+use FireflyIII\Models\Tag;
+use FireflyIII\Models\Transaction;
 use FireflyIII\Models\TransactionJournal;
-use FireflyIII\Models\TransactionType;
 use FireflyIII\Repositories\Account\AccountRepositoryInterface;
-use FireflyIII\Repositories\Journal\JournalRepositoryInterface;
 use Log;
 use Throwable;
 
@@ -71,127 +70,43 @@ trait ModelInformation
     }
 
     /**
-     * Get the destination account. Is complex.
+     * @codeCoverageIgnore
      *
-     * @param TransactionJournal $journal
-     * @param TransactionType    $destinationType
-     * @param array              $data
+     * @return string[]
      *
-     * @return Account
-     *
-     * @throws FireflyException
-     *
-     * @SuppressWarnings(PHPMD.ExcessiveMethodLength)
-     * @SuppressWarnings(PHPMD.CyclomaticComplexity)
+     * @psalm-return array<int|null, string>
      */
-    protected function getDestinationAccount(TransactionJournal $journal, TransactionType $destinationType, array $data
-    ): Account // helper for conversion. Get info from obj.
+    protected function getLiabilityTypes(): array
     {
-        /** @var AccountRepositoryInterface $accountRepository */
-        $accountRepository = app(AccountRepositoryInterface::class);
-        /** @var JournalRepositoryInterface $journalRepos */
-        $journalRepos       = app(JournalRepositoryInterface::class);
-        $sourceAccount      = $journalRepos->getJournalSourceAccounts($journal)->first();
-        $destinationAccount = $journalRepos->getJournalDestinationAccounts($journal)->first();
-        $sourceType         = $journal->transactionType;
-        $joined             = $sourceType->type . '-' . $destinationType->type;
-        switch ($joined) {
-            default:
-                throw new FireflyException('Cannot handle ' . $joined); // @codeCoverageIgnore
-            case TransactionType::WITHDRAWAL . '-' . TransactionType::DEPOSIT:
-                // one
-                $destination = $sourceAccount;
-                break;
-            case TransactionType::WITHDRAWAL . '-' . TransactionType::TRANSFER:
-                // two
-                $destination = $accountRepository->findNull((int)$data['destination_account_asset']);
-                break;
-            case TransactionType::DEPOSIT . '-' . TransactionType::WITHDRAWAL:
-            case TransactionType::TRANSFER . '-' . TransactionType::WITHDRAWAL:
-                // three and five
-                if ('' === $data['destination_account_expense'] || null === $data['destination_account_expense']) {
-                    // destination is a cash account.
-                    return $accountRepository->getCashAccount();
-                }
-                $data        = [
-                    'name'            => $data['destination_account_expense'],
-                    'accountType'     => 'expense',
-                    'account_type_id' => null,
-                    'virtualBalance'  => 0,
-                    'active'          => true,
-                    'iban'            => null,
-                ];
-                $destination = $accountRepository->store($data);
-                break;
-            case TransactionType::DEPOSIT . '-' . TransactionType::TRANSFER:
-            case TransactionType::TRANSFER . '-' . TransactionType::DEPOSIT:
-                // four and six
-                $destination = $destinationAccount;
-                break;
-        }
+        /** @var AccountRepositoryInterface $repository */
+        $repository = app(AccountRepositoryInterface::class);
+        // types of liability:
+        $debt     = $repository->getAccountTypeByType(AccountType::DEBT);
+        $loan     = $repository->getAccountTypeByType(AccountType::LOAN);
+        $mortgage = $repository->getAccountTypeByType(AccountType::MORTGAGE);
+        /** @noinspection NullPointerExceptionInspection */
+        $liabilityTypes = [
+            $debt->id     => (string) trans(sprintf('firefly.account_type_%s', AccountType::DEBT)),
+            $loan->id     => (string) trans(sprintf('firefly.account_type_%s', AccountType::LOAN)),
+            $mortgage->id => (string) trans(sprintf('firefly.account_type_%s', AccountType::MORTGAGE)),
+        ];
+        asort($liabilityTypes);
 
-        return $destination;
+        return $liabilityTypes;
     }
 
     /**
-     * Get the source account.
-     *
-     * @param TransactionJournal $journal
-     * @param TransactionType    $destinationType
-     * @param array              $data
-     *
-     * @return Account
-     *
-     * @throws FireflyException
-     *
-     * @SuppressWarnings(PHPMD.ExcessiveMethodLength)
-     * @SuppressWarnings(PHPMD.CyclomaticComplexity)
+     * @codeCoverageIgnore
+     * @return array
      */
-    protected function getSourceAccount(TransactionJournal $journal, TransactionType $destinationType, array $data
-    ): Account // helper for conversion. Get info from obj.
+    protected function getRoles(): array
     {
-        /** @var AccountRepositoryInterface $accountRepository */
-        $accountRepository = app(AccountRepositoryInterface::class);
-        /** @var JournalRepositoryInterface $journalRepos */
-        $journalRepos       = app(JournalRepositoryInterface::class);
-        $sourceAccount      = $journalRepos->getJournalSourceAccounts($journal)->first();
-        $destinationAccount = $journalRepos->getJournalDestinationAccounts($journal)->first();
-        $sourceType         = $journal->transactionType;
-        $joined             = $sourceType->type . '-' . $destinationType->type;
-        switch ($joined) {
-            default:
-                throw new FireflyException('Cannot handle ' . $joined); // @codeCoverageIgnore
-            case TransactionType::WITHDRAWAL . '-' . TransactionType::DEPOSIT:
-            case TransactionType::TRANSFER . '-' . TransactionType::DEPOSIT:
-
-                if ('' === $data['source_account_revenue'] || null === $data['source_account_revenue']) {
-                    // destination is a cash account.
-                    return $accountRepository->getCashAccount();
-                }
-
-                $data   = [
-                    'name'            => $data['source_account_revenue'],
-                    'accountType'     => 'revenue',
-                    'virtualBalance'  => 0,
-                    'active'          => true,
-                    'account_type_id' => null,
-                    'iban'            => null,
-                ];
-                $source = $accountRepository->store($data);
-                break;
-            case TransactionType::WITHDRAWAL . '-' . TransactionType::TRANSFER:
-            case TransactionType::TRANSFER . '-' . TransactionType::WITHDRAWAL:
-                $source = $sourceAccount;
-                break;
-            case TransactionType::DEPOSIT . '-' . TransactionType::WITHDRAWAL:
-                $source = $destinationAccount;
-                break;
-            case TransactionType::DEPOSIT . '-' . TransactionType::TRANSFER:
-                $source = $accountRepository->findNull((int)$data['source_account_asset']);
-                break;
+        $roles = [];
+        foreach (config('firefly.accountRoles') as $role) {
+            $roles[$role] = (string) trans(sprintf('firefly.account_role_%s', $role));
         }
 
-        return $source;
+        return $roles;
     }
 
     /**
@@ -203,15 +118,26 @@ trait ModelInformation
      */
     protected function getTriggersForBill(Bill $bill): array // get info and augument
     {
-        $result   = [];
-        $triggers = ['currency_is', 'amount_more', 'amount_less', 'description_contains'];
-        $values   = [
+        // TODO duplicated code.
+        $operators = config('firefly.search.operators');
+        $triggers  = [];
+        foreach ($operators as $key => $operator) {
+            if ('user_action' !== $key && false === $operator['alias']) {
+
+                $triggers[$key] = (string) trans(sprintf('firefly.rule_trigger_%s_choice', $key));
+            }
+        }
+        asort($triggers);
+
+        $result       = [];
+        $billTriggers = ['currency_is', 'amount_more', 'amount_less', 'description_contains'];
+        $values       = [
             $bill->transactionCurrency()->first()->name,
-            round((float)$bill->amount_min, 12),
-            round((float)$bill->amount_max, 12),
+            round((float) $bill->amount_min, 12),
+            round((float) $bill->amount_max, 12),
             $bill->name,
         ];
-        foreach ($triggers as $index => $trigger) {
+        foreach ($billTriggers as $index => $trigger) {
             try {
                 $string = view(
                     'rules.partials.trigger',
@@ -220,6 +146,7 @@ trait ModelInformation
                         'oldValue'   => $values[$index],
                         'oldChecked' => false,
                         'count'      => $index + 1,
+                        'triggers'   => $triggers,
                     ]
                 )->render();
                 // @codeCoverageIgnoreStart
@@ -239,32 +166,120 @@ trait ModelInformation
     }
 
     /**
-     * Is transaction opening balance?
-     *
      * @param TransactionJournal $journal
      *
-     * @return bool
+     * @return array
      */
-    protected function isOpeningBalance(TransactionJournal $journal): bool
+    private function getTriggersForJournal(TransactionJournal $journal): array
     {
-        return TransactionType::OPENING_BALANCE === $journal->transactionType->type;
+        // TODO duplicated code.
+        $operators = config('firefly.search.operators');
+        $triggers  = [];
+        foreach ($operators as $key => $operator) {
+            if ('user_action' !== $key && false === $operator['alias']) {
+
+                $triggers[$key] = (string) trans(sprintf('firefly.rule_trigger_%s_choice', $key));
+            }
+        }
+        asort($triggers);
+
+        $result          = [];
+        $journalTriggers = [];
+        $values          = [];
+        $index           = 0;
+        // amount, description, category, budget, tags, source, destination, notes, currency type
+        //,type
+        /** @var Transaction $source */
+        $source = $journal->transactions()->where('amount', '<', 0)->first();
+        /** @var Transaction $destination */
+        $destination = $journal->transactions()->where('amount', '>', 0)->first();
+        if (null === $destination || null === $source) {
+            return $result;
+        }
+        // type
+        $journalTriggers[$index] = 'transaction_type';
+        $values[$index]          = $journal->transactionType->type;
+        $index++;
+
+        // currency
+        $journalTriggers[$index] = 'currency_is';
+        $values[$index]          = sprintf('%s (%s)', $journal->transactionCurrency->name, $journal->transactionCurrency->code);
+        $index++;
+
+        // amount_exactly:
+        $journalTriggers[$index] = 'amount_exactly';
+        $values[$index]          = $destination->amount;
+        $index++;
+
+        // description_is:
+        $journalTriggers[$index] = 'description_is';
+        $values[$index]          = $journal->description;
+        $index++;
+
+        // from_account_is
+        $journalTriggers[$index] = 'source_account_is';
+        $values[$index]          = $source->account->name;
+        $index++;
+
+        // to_account_is
+        $journalTriggers[$index] = 'destination_account_is';
+        $values[$index]          = $destination->account->name;
+        $index++;
+
+        // category (if)
+        $category = $journal->categories()->first();
+        if (null !== $category) {
+            $journalTriggers[$index] = 'category_is';
+            $values[$index]          = $category->name;
+            $index++;
+        }
+        // budget (if)
+        $budget = $journal->budgets()->first();
+        if (null !== $budget) {
+            $journalTriggers[$index] = 'budget_is';
+            $values[$index]          = $budget->name;
+            $index++;
+        }
+        // tags (if)
+        $tags = $journal->tags()->get();
+        /** @var Tag $tag */
+        foreach ($tags as $tag) {
+            $journalTriggers[$index] = 'tag_is';
+            $values[$index]          = $tag->tag;
+            $index++;
+        }
+        // notes (if)
+        $notes = $journal->notes()->first();
+        if (null !== $notes) {
+            $journalTriggers[$index] = 'notes_are';
+            $values[$index]          = $notes->text;
+        }
+
+        foreach ($journalTriggers as $index => $trigger) {
+            try {
+                $string = view(
+                    'rules.partials.trigger',
+                    [
+                        'oldTrigger' => $trigger,
+                        'oldValue'   => $values[$index],
+                        'oldChecked' => false,
+                        'count'      => $index + 1,
+                        'triggers'   => $triggers,
+                    ]
+                )->render();
+                // @codeCoverageIgnoreStart
+            } catch (Throwable $e) {
+
+                Log::debug(sprintf('Throwable was thrown in getTriggersForJournal(): %s', $e->getMessage()));
+                Log::debug($e->getTraceAsString());
+                $string = '';
+                // @codeCoverageIgnoreEnd
+            }
+            if ('' !== $string) {
+                $result[] = $string;
+            }
+        }
+
+        return $result;
     }
-
-    /**
-     * Checks if journal is split.
-     *
-     * @param TransactionJournal $journal
-     *
-     * @return bool
-     */
-    protected function isSplitJournal(TransactionJournal $journal): bool // validate objects
-    {
-        /** @var JournalRepositoryInterface $repository */
-        $repository = app(JournalRepositoryInterface::class);
-        $repository->setUser($journal->user);
-        $count = $repository->countTransactions($journal);
-
-        return $count > 2;
-    }
-
 }
